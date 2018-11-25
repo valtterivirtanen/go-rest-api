@@ -23,12 +23,12 @@ func main() {
 	port := os.Getenv("PORT")
 
 	if port == "" {
-		port = ":8000"
+		port = "8000"
 	}
 
 	http.HandleFunc("/", index)
 
-	http.ListenAndServe(port, nil)
+	http.ListenAndServe(":"+port, nil)
 }
 
 func index(w http.ResponseWriter, r *http.Request) {
