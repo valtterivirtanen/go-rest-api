@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <title>{{.Title}}</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" media="screen" href="/css/main.css" />
+
+</head>
+<body>
+  <div>
+  <h1>{{.Heading1}}</h1>
+  {{if .NotAuthenticated}}
+  <form method="POST" action="/login">
+    <label for="name">Username</label>
+    <input required type="text" id="name" placeholder="Username" name="name">
+    <br>
+    <label for="password">Password</label>
+    <input required type="password" id="password" placeholder="Password" name="password">
+    <br>
+    <button type="submit">Login</button>
+  </form>
+  <br>
+  <a href="/signUp">Sign Up</a>
+  {{end}}
+  </div>
+</body>
+</html>
