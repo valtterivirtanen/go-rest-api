@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path"
 
 	"golang.org/x/crypto/bcrypt"
 
@@ -25,6 +26,10 @@ type User struct {
 	Email    string `json:"email"`
 	Username string `json:"username"`
 	Password string `json:"-"`
+}
+
+type JWTToken struct {
+	Token string `json:"token"`
 }
 
 var tpl *template.Template
@@ -62,7 +67,7 @@ func main() {
 	http.Handle("/css/", http.StripPrefix("/css/", http.FileServer(http.Dir("css/"))))
 
 	http.HandleFunc("/api/users", usersHandler)
-	//http.HandleFunc("/api/users/{id}", singleUserHandler)
+	http.HandleFunc(`/api/users/1`, singleUserHandler)
 	/*
 		err := http.ListenAndServe(":"+port, nil)
 		if err != nil {
@@ -106,7 +111,7 @@ func loggedIn(w http.ResponseWriter, r *http.Request) {
 
 func loginHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method == "POST" {
-		r.ParseForm()
+
 		name := r.FormValue("name")
 		passwrd := r.FormValue("password")
 		redirectTo := "/"
@@ -121,6 +126,70 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 
 		http.Redirect(w, r, redirectTo, 302)
 	} else {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func singleUserHandler(w http.ResponseWriter, r *http.Request) {
+	user := User{}
+
+	switch r.Method {
+	case "PUT":
+		id := path.Base(r.URL.Path)
+
+		err := db.QueryRow("SELECT id, email, username FROM users WHERE id=$1", id).Scan(&user.ID, &user.Email, &user.Username)
+
+		v := r.FormValue("username")
+		if len(v) > 0 {
+			user.Username = v
+		}
+
+		v = r.FormValue("email")
+		if len(v) > 0 {
+			user.Email = v
+		}
+
+		if err != nil {
+			log.Println(err)
+		} else {
+			_, err = db.Exec("UPDATE users SET email=$1, username=$2 WHERE id=$3", user.Email, user.Username, user.ID)
+		}
+
+		if err != nil {
+			log.Println(err)
+		}
+		w.Header().Set("Content-Type", "application/json; charset=UTF-8")
+
+		json.NewEncoder(w).Encode(user)
+	case "GET":
+		params := r.URL.Query()
+		id := params.Get("id")
+		//id := path.Base(r.URL.Path)
+		fmt.Println(params)
+		fmt.Println(r.URL.Query())
+		fmt.Println(r.URL.Path)
+		if len(id) == 0 {
+			http.Error(w, "User not found", http.StatusNotFound)
+		}
+		if err := db.QueryRow("SELECT id, email, username FROM users WHERE id=$1", id).Scan(&user.ID, &user.Email, &user.Username); err != nil {
+			log.Println(err)
+		}
+
+		w.Header().Set("Content-Type", "application/json; charset=UTF-8")
+
+		json.NewEncoder(w).Encode(user)
+	case "DELETE":
+		id := path.Base(r.URL.Path)
+
+		err := db.QueryRow("DELETE FROM users WHERE id=$1 RETURNING id,username,email", id).Scan(&user.ID, &user.Email, &user.Username)
+
+		if err != nil {
+			log.Println(err)
+		}
+		w.Header().Set("Content-Type", "application/json; charset=UTF-8")
+
+		json.NewEncoder(w).Encode(user)
+	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}
 }
@@ -198,7 +267,7 @@ func usersHandler(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json; charset=UTF-8")
 
 		json.NewEncoder(w).Encode(user)
-		http.Redirect(w, r, "/", http.StatusCreated)
+
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}
