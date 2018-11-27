@@ -112,14 +112,16 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 		redirectTo := "/"
 
 		if name != "" && passwrd != "" {
-			redirectTo = "/loggedIn"
+
 			err := validateCredentials(name, passwrd)
-			if err == false {
-				http.Error(w, "Invalid Credentials", http.StatusUnauthorized)
+			if err == true {
+				redirectTo = "/loggedIn"
 			}
 		}
 
 		http.Redirect(w, r, redirectTo, 302)
+	} else {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}
 }
 
@@ -175,6 +177,8 @@ func usersHandler(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 		}
 
+		w.Header().Set("Content-Type", "application/json; charset=UTF-8")
+
 		json.NewEncoder(w).Encode(users)
 
 	case "POST":
@@ -190,6 +194,8 @@ func usersHandler(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 		}
+
+		w.Header().Set("Content-Type", "application/json; charset=UTF-8")
 
 		json.NewEncoder(w).Encode(user)
 		http.Redirect(w, r, "/", http.StatusCreated)

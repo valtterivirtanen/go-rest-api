@@ -19,6 +19,7 @@ div {
   border-radius: 15px;
   border-style: solid;
   box-shadow: 5px 5px black;
+  overflow-x:auto;
 }
 
 form {
@@ -28,7 +29,6 @@ form {
 h1 {
   text-transform: uppercase;
   font-size: 45px;
-
 }
 
 input {
@@ -72,4 +72,24 @@ a {
 
 a:hover {
   color:black;
+}
+
+#users {
+  width: inherit;
+}
+
+table {
+  width: inherit;
+}
+
+th {
+  font-size: 18px;
+}
+
+tr {
+  border-bottom-style: solid;
+}
+
+tr:hover {
+  background-color: white;
 }
