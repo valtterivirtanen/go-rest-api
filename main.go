@@ -9,10 +9,14 @@ import (
 	"net/http"
 	"os"
 	"path"
+	"time"
 
 	"golang.org/x/crypto/bcrypt"
 
 	_ "github.com/lib/pq"
+
+	//"github.com/gorilla/mux"
+	"github.com/dgrijalva/jwt-go"
 )
 
 type Page struct {
@@ -28,9 +32,18 @@ type User struct {
 	Password string `json:"-"`
 }
 
+type MyError struct {
+	Message string
+	Path    string
+	Error   error
+	Code    int
+}
+
 type JWTToken struct {
 	Token string `json:"token"`
 }
+
+const secret = "tätä.ei_kukaan|tosta,v44nvoiarvata?EIHÄN!?"
 
 var tpl *template.Template
 var signuptpl *template.Template
@@ -59,6 +72,7 @@ func main() {
 	if port == "" {
 		port = "8000"
 	}
+	//rtr := mux.NewRouter()
 
 	http.HandleFunc("/", index)
 	http.HandleFunc("/login", loginHandler)
@@ -120,6 +134,7 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 
 			err := validateCredentials(name, passwrd)
 			if err == true {
+				//createToken(name)
 				redirectTo = "/loggedIn"
 			}
 		}
@@ -128,6 +143,18 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 	} else {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}
+}
+
+func createToken(username string) *JWTToken {
+	token := jwt.New(jwt.GetSigningMethod("HS256"))
+	claims := make(jwt.MapClaims)
+	claims["username"] = username
+	claims["exp"] = time.Now().Add(time.Minute * 10).Unix()
+
+	tokenStr, _ := token.SignedString([]byte(secret))
+	JWTToken := JWTToken{tokenStr}
+
+	return &JWTToken
 }
 
 func singleUserHandler(w http.ResponseWriter, r *http.Request) {
