@@ -43,6 +43,10 @@ type JWTToken struct {
 	Token string `json:"token"`
 }
 
+type CustomClaims struct {
+	jwt.StandardClaims
+}
+
 const secret = "tätä.ei_kukaan|tosta,v44nvoiarvata?EIHÄN!?"
 
 var tpl *template.Template
@@ -53,7 +57,7 @@ func init() {
 	tpl = template.Must(template.ParseFiles("templates/tpl.gohtml"))
 	signuptpl = template.Must(template.ParseFiles("templates/signup.gohtml"))
 	err := error(nil)
-	db, err = sql.Open("postgres", "postgres://depeoudeuwldzo:56fc88f2e91d47084a67c3c00286b88eb6a9093d75f31f63027aadafa49e535b@ec2-79-125-124-30.eu-west-1.compute.amazonaws.com:5432/db0busq5pa2aas")
+	db, err = sql.Open("postgres", "postgres://**********")
 
 	if err != nil {
 		panic(err)
@@ -148,8 +152,9 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 func createToken(username string) *JWTToken {
 	token := jwt.New(jwt.GetSigningMethod("HS256"))
 	claims := make(jwt.MapClaims)
-	claims["username"] = username
+	claims["name"] = username
 	claims["exp"] = time.Now().Add(time.Minute * 10).Unix()
+	claims["admin"] = true
 
 	tokenStr, _ := token.SignedString([]byte(secret))
 	JWTToken := JWTToken{tokenStr}
