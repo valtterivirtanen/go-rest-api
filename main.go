@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
@@ -97,7 +98,7 @@ func main() {
 
 	apiRouter.HandleFunc("/get-token", getToken).Methods("POST")
 
-	apiRouter.HandleFunc("/users", getUsers).Methods("GET")
+	apiRouter.HandleFunc("/users", autheticationMiddleware(getUsers)).Methods("GET")
 	apiRouter.HandleFunc("/users", createUser).Methods("POST")
 	apiRouter.HandleFunc("/users/{id:[0-9]+}", getUser).Methods("GET")
 	apiRouter.HandleFunc("/users/{id:[0-9]+}", updateUser).Methods("PUT")
@@ -108,7 +109,17 @@ func main() {
 
 func autheticationMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		next.ServeHTTP(w, r)
+		reqToken := r.Header.Get("Authorization")
+		if len(reqToken) > 0 {
+			splitToken := strings.Split(reqToken, "Bearer ")
+			if len(splitToken) > 1 {
+				token := JWTToken{splitToken[1]}
+				if validateToken(&token) {
+					next.ServeHTTP(w, r)
+				}
+			}
+		}
+		http.Error(w, "Invalid authorization token", 401)
 	}
 }
 
