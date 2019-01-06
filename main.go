@@ -114,49 +114,86 @@ func autheticationMiddleware(next http.HandlerFunc) http.HandlerFunc {
 
 func getToken(w http.ResponseWriter, r *http.Request) {
 	var u User
-	if r.Body == nil {
-		http.Error(w, "Please send a request body", 400)
+	body, err := ioutil.ReadAll(r.Body)
+
+	if err != nil {
+		http.Error(w, "Invalid request body", 400)
 		return
 	}
-	err := json.NewDecoder(r.Body).Decode(&u)
+	if len(body) == 0 {
+		http.Error(w, "Please give a request body", 400)
+		return
+	}
+
+	err = json.Unmarshal(body, &u)
 	if err != nil {
 		http.Error(w, err.Error(), 400)
 		return
 	}
 
-	u.Password = hashPwd([]byte(u.Password))
-
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+	//username and password are required
+	if len(u.Username) == 0 {
+		http.Error(w, "Provide username please", 400)
+		return
 	}
-	name := u.Username
+	if len(u.Password) == 0 {
+		http.Error(w, "Provide password please", 400)
+		return
+	}
+
 	passwrd := u.Password
+	name := u.Username
 
-	if name != "" && passwrd != "" {
+	valid := validateCredentials(name, passwrd)
+	if valid == true {
+		token := createToken(name)
 
-		valid := validateCredentials(name, passwrd)
-		if valid == true {
-			token := createToken(name)
-			w.Header().Set("Content-Type", "application/json; charset=UTF-8")
+		w.Header().Set("Content-Type", "application/json; charset=UTF-8")
 
-			json.NewEncoder(w).Encode(token)
-		} else {
-			http.Error(w, "Invalid credentials", http.StatusForbidden)
-		}
+		json.NewEncoder(w).Encode(token)
+	} else {
+		http.Error(w, "Invalid credentials", http.StatusForbidden)
 	}
 
 }
 
 func createToken(username string) *JWTToken {
-	token := jwt.New(jwt.GetSigningMethod("HS256"))
 	claims := make(jwt.MapClaims)
 	claims["name"] = username
 	claims["exp"] = time.Now().Add(time.Minute * 10).Unix()
 
-	tokenStr, _ := token.SignedString([]byte(secret))
+	token := jwt.NewWithClaims(jwt.GetSigningMethod("HS256"), claims)
+
+	tokenStr, err := token.SignedString([]byte(secret))
+	if err != nil {
+		fmt.Println("error signing token string:", err)
+		return nil
+	}
+
 	JWTToken := JWTToken{tokenStr}
 
 	return &JWTToken
+}
+
+func validateToken(tokenString *JWTToken) bool {
+	token, err := jwt.Parse(tokenString.Token, func(token *jwt.Token) (interface{}, error) {
+		// Don't forget to validate the alg is what you expect:
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("Unexpected signing method: %v", token.Header["alg"])
+		}
+
+		return []byte(secret), nil
+	})
+
+	if err != nil {
+		fmt.Println(err)
+		return false
+	}
+	if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
+		fmt.Println(claims["name"], claims["exp"], "claims")
+		return true
+	}
+	return false
 }
 
 func getUser(w http.ResponseWriter, r *http.Request) {
@@ -165,10 +202,13 @@ func getUser(w http.ResponseWriter, r *http.Request) {
 	id := params["id"]
 
 	if len(id) == 0 {
-		http.Error(w, "User not found", http.StatusNotFound)
+		http.Error(w, "Invalid user id", http.StatusNotFound)
 	}
+
 	if err := db.QueryRow("SELECT id, email, username FROM users WHERE id=$1", id).Scan(&user.ID, &user.Email, &user.Username); err != nil {
 		log.Println(err)
+		http.Error(w, "User not found", http.StatusNotFound)
+		return
 	}
 
 	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
@@ -232,16 +272,15 @@ func deleteUser(w http.ResponseWriter, r *http.Request) {
 func validateCredentials(name string, passwrd string) bool {
 
 	hashedPwd, err := getHashedPassword(name, passwrd)
-
 	if err != nil {
-		log.Println(err)
+		log.Println("failed to get hashed password", err)
 		return false
 	}
 
 	err = validPassword(passwrd, hashedPwd)
 
 	if err != nil {
-		log.Println(err)
+		log.Println("error validating password", err)
 		return false
 	}
 
@@ -323,7 +362,7 @@ func createUserData(u *User) (*User, error) {
 
 	user := User{}
 
-	if err2 := db.QueryRow("SELECT id, email, username FROM users WHERE username=$1", u.Username).Scan(&user.ID, &user.Email, &user.Username); err2 != nil {
+	if err2 := db.QueryRow("SELECT id, email, username FROM users WHERE username=$1 AND password=$2", u.Username, u.Password).Scan(&user.ID, &user.Email, &user.Username); err2 != nil {
 		return nil, err2
 	}
 
