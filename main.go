@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
@@ -21,7 +22,7 @@ type User struct {
 	ID       int    `json:"id"`
 	Email    string `json:"email"`
 	Username string `json:"username"`
-	Password string `json:"-"`
+	Password string `json:"password"`
 }
 
 type MyError struct {
@@ -44,8 +45,20 @@ const secret = "tÃ¤tÃ¤.ei_kukaan|tosta,v44nvoiarvata?EIHÃ„N!?"
 var db *sql.DB
 
 func init() {
+	checkDbVariable := func(v string) string{
+		val, ok := os.LookupEnv(v)
+		if !ok {
+			panic(fmt.Errorf("Environment variable for %v is missing", v))
+		}
+		return val
+	}
+
+	connectionString := fmt.Sprintf(
+		"dbname=%v user=%v password=%v host=ec2-79-125-124-30.eu-west-1.compute.amazonaws.com port=5432 sslmode=require",
+		checkDbVariable("db_name"),checkDbVariable("db_username"),checkDbVariable("db_password"),
+	)
 	err := error(nil)
-	db, err = sql.Open("postgres", os.Getenv("DATABASE_URL"))
+	db, err = sql.Open("postgres", connectionString)
 
 	if err != nil {
 		panic(err)
@@ -54,7 +67,7 @@ func init() {
 	if err = db.Ping(); err != nil {
 		panic(err)
 	}
-	fmt.Println("Connection to database established.")
+	defer fmt.Println("Connection to database established.")
 
 }
 
@@ -63,37 +76,61 @@ func main() {
 
 	if port == "" {
 		port = "8000"
+		log.Printf("Port defaulted to %v", port)
 	}
 	rtr := mux.NewRouter()
 
-	rtr.HandleFunc("/api/get-token", getToken).Methods("POST")
+	apiRouter := rtr.PathPrefix("/api").Subrouter()
 
-	rtr.HandleFunc("/api/users", getUsers).Methods("GET")
-	rtr.HandleFunc("/api/users", createUser).Methods("POST")
-	rtr.HandleFunc("/api/users/{id:[0-9]+}", getUser).Methods("GET")
-	rtr.HandleFunc("/api/users/{id:[0-9]+}", updateUser).Methods("PUT")
-	rtr.HandleFunc("/api/users/{id:[0-9]+}", deleteUser).Methods("DELETE")
+	apiRouter.HandleFunc("/get-token", getToken).Methods("POST")
+
+	apiRouter.HandleFunc("/users", getUsers).Methods("GET")
+	apiRouter.HandleFunc("/users", createUser).Methods("POST")
+	apiRouter.HandleFunc("/users/{id:[0-9]+}", getUser).Methods("GET")
+	apiRouter.HandleFunc("/users/{id:[0-9]+}", updateUser).Methods("PUT")
+	apiRouter.HandleFunc("/users/{id:[0-9]+}", deleteUser).Methods("DELETE")
 
 	log.Fatal(http.ListenAndServe(":"+port, rtr))
 }
 
+func autheticationMiddleware(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		next.ServeHTTP(w, r)
+	}
+}
+
 func getToken(w http.ResponseWriter, r *http.Request) {
+	var u User
+	if r.Body == nil {
+		http.Error(w, "Please send a request body", 400)
+		return
+	}
+	err := json.NewDecoder(r.Body).Decode(&u)
+	if err != nil {
+		http.Error(w, err.Error(), 400)
+		return
+	}
 
-		name := r.FormValue("name")
-		passwrd := r.FormValue("password")
+	u.Password = hashPwd([]byte(u.Password))
 
-		if name != "" && passwrd != "" {
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+	name := u.Username
+	passwrd := u.Password
 
-			valid := validateCredentials(name, passwrd)
-			if valid == true {
-				token := createToken(name)
-				w.Header().Set("Content-Type", "application/json; charset=UTF-8")
+	if name != "" && passwrd != "" {
 
-				json.NewEncoder(w).Encode(token)
-			} else {
-				http.Error(w, "Invalid credentials", http.StatusForbidden)
-			}
+		valid := validateCredentials(name, passwrd)
+		if valid == true {
+			token := createToken(name)
+			w.Header().Set("Content-Type", "application/json; charset=UTF-8")
+
+			json.NewEncoder(w).Encode(token)
+		} else {
+			http.Error(w, "Invalid credentials", http.StatusForbidden)
 		}
+	}
 
 }
 
@@ -102,7 +139,6 @@ func createToken(username string) *JWTToken {
 	claims := make(jwt.MapClaims)
 	claims["name"] = username
 	claims["exp"] = time.Now().Add(time.Minute * 10).Unix()
-	claims["admin"] = true
 
 	tokenStr, _ := token.SignedString([]byte(secret))
 	JWTToken := JWTToken{tokenStr}
@@ -226,21 +262,41 @@ func getUsers(w http.ResponseWriter, r *http.Request) {
 
 func createUser(w http.ResponseWriter, r *http.Request) {
 	var u User
-	if r.Body == nil {
-		http.Error(w, "Please send a request body", 400)
+
+	body, err := ioutil.ReadAll(r.Body)
+
+	if err != nil {
+		http.Error(w, "Invalid request body", 400)
 		return
 	}
-	err := json.NewDecoder(r.Body).Decode(&u)
+	if len(body) == 0 {
+		http.Error(w, "Please give a request body", 400)
+		return
+	}
+
+	err = json.Unmarshal(body, &u)
 	if err != nil {
+		log.Println(267, err)
 		http.Error(w, err.Error(), 400)
 		return
 	}
 
+	//username and password are required
+	if len(u.Username) == 0 {
+		http.Error(w, "Provide username please", 400)
+		return
+	}
+	if len(u.Password) == 0 {
+		http.Error(w, "Provide password please", 400)
+		return
+	}
 	u.Password = hashPwd([]byte(u.Password))
 
 	user, err := createUserData(&u)
 
 	if err != nil {
+		log.Println(277, err)
+
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
 
