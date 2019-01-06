@@ -45,20 +45,27 @@ const secret = "tÃ¤tÃ¤.ei_kukaan|tosta,v44nvoiarvata?EIHÃ„N!?"
 var db *sql.DB
 
 func init() {
-	checkDbVariable := func(v string) string{
+	checkDbVariable := func(v string) string {
 		val, ok := os.LookupEnv(v)
 		if !ok {
-			panic(fmt.Errorf("Environment variable for %v is missing", v))
+			fmt.Printf("Environment variable for %v is missing\n", v)
+			return ""
 		}
 		return val
 	}
 
-	connectionString := fmt.Sprintf(
-		"dbname=%v user=%v password=%v host=ec2-79-125-124-30.eu-west-1.compute.amazonaws.com port=5432 sslmode=require",
-		checkDbVariable("db_name"),checkDbVariable("db_username"),checkDbVariable("db_password"),
-	)
-	err := error(nil)
-	db, err = sql.Open("postgres", connectionString)
+	var connectionString string
+	// prefer dababase_url env var
+	if val := checkDbVariable("DATABASE_URL"); val != "" {
+		connectionString = val
+	} else {
+		connectionString = fmt.Sprintf(
+			"dbname=%v user=%v password=%v host=ec2-79-125-124-30.eu-west-1.compute.amazonaws.com port=5432 sslmode=require",
+			checkDbVariable("db_name"), checkDbVariable("db_username"), checkDbVariable("db_password"),
+		)
+	}
+
+	db, err := sql.Open("postgres", connectionString)
 
 	if err != nil {
 		panic(err)
@@ -80,6 +87,11 @@ func main() {
 	}
 	rtr := mux.NewRouter()
 
+	rtr.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json; charset=UTF-8")
+		json.NewEncoder(w).Encode("{'server':'running'}")
+
+	})
 	apiRouter := rtr.PathPrefix("/api").Subrouter()
 
 	apiRouter.HandleFunc("/get-token", getToken).Methods("POST")
