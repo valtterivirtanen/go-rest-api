@@ -55,7 +55,7 @@ func init() {
 	}
 
 	var connectionString string
-	// prefer dababase_url env var
+	// prefer DABABASE_URL env var
 	if val := checkDbVariable("DATABASE_URL"); val != "" {
 		connectionString = val
 	} else {
@@ -64,8 +64,9 @@ func init() {
 			checkDbVariable("db_name"), checkDbVariable("db_username"), checkDbVariable("db_password"),
 		)
 	}
+	var err error
 
-	db, err := sql.Open("postgres", connectionString)
+	db, err = sql.Open("postgres", connectionString)
 
 	if err != nil {
 		panic(err)
@@ -161,7 +162,6 @@ func createToken(username string) *JWTToken {
 func getUser(w http.ResponseWriter, r *http.Request) {
 	user := User{}
 	params := mux.Vars(r)
-
 	id := params["id"]
 
 	if len(id) == 0 {
@@ -288,7 +288,6 @@ func createUser(w http.ResponseWriter, r *http.Request) {
 
 	err = json.Unmarshal(body, &u)
 	if err != nil {
-		log.Println(267, err)
 		http.Error(w, err.Error(), 400)
 		return
 	}
@@ -307,8 +306,6 @@ func createUser(w http.ResponseWriter, r *http.Request) {
 	user, err := createUserData(&u)
 
 	if err != nil {
-		log.Println(277, err)
-
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
 
@@ -335,7 +332,6 @@ func createUserData(u *User) (*User, error) {
 
 func getUsersData() ([]*User, error) {
 	rows, err := db.Query("SELECT id, email, username FROM users")
-
 	if err != nil {
 		return nil, err
 	}
