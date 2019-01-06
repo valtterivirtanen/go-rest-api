@@ -124,21 +124,23 @@ func autheticationMiddleware(next http.HandlerFunc) http.HandlerFunc {
 }
 
 func getToken(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
+
 	var u User
 	body, err := ioutil.ReadAll(r.Body)
 
 	if err != nil {
-		http.Error(w, "Invalid request body", 400)
+		http.Error(w, "Invalid request body "+err.Error(), 400)
 		return
 	}
 	if len(body) == 0 {
-		http.Error(w, "Please give a request body", 400)
+		http.Error(w, "request body length is 0", 400)
 		return
 	}
 
 	err = json.Unmarshal(body, &u)
 	if err != nil {
-		http.Error(w, err.Error(), 400)
+		http.Error(w, "error unmarshalling json: "+err.Error(), 400)
 		return
 	}
 
@@ -158,9 +160,6 @@ func getToken(w http.ResponseWriter, r *http.Request) {
 	valid := validateCredentials(name, passwrd)
 	if valid == true {
 		token := createToken(name)
-
-		w.Header().Set("Content-Type", "application/json; charset=UTF-8")
-
 		json.NewEncoder(w).Encode(token)
 	} else {
 		http.Error(w, "Invalid credentials", http.StatusForbidden)
@@ -188,7 +187,7 @@ func createToken(username string) *JWTToken {
 
 func validateToken(tokenString *JWTToken) bool {
 	token, err := jwt.Parse(tokenString.Token, func(token *jwt.Token) (interface{}, error) {
-		// Don't forget to validate the alg is what you expect:
+
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("Unexpected signing method: %v", token.Header["alg"])
 		}
@@ -208,32 +207,37 @@ func validateToken(tokenString *JWTToken) bool {
 }
 
 func getUser(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
+
 	user := User{}
 	params := mux.Vars(r)
 	id := params["id"]
 
 	if len(id) == 0 {
-		http.Error(w, "Invalid user id", http.StatusNotFound)
+		http.Error(w, "length of user id is 0", http.StatusNotFound)
 	}
 
 	if err := db.QueryRow("SELECT id, email, username FROM users WHERE id=$1", id).Scan(&user.ID, &user.Email, &user.Username); err != nil {
-		log.Println(err)
-		http.Error(w, "User not found", http.StatusNotFound)
+		fmt.Println(err)
+		http.Error(w, "user not found"+err.Error(), http.StatusNotFound)
 		return
 	}
-
-	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
 
 	json.NewEncoder(w).Encode(user)
 }
 
 func updateUser(w http.ResponseWriter, r *http.Request) {
-	user := User{}
+	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
 
+	user := User{}
 	params := mux.Vars(r)
 	id := params["id"]
 
 	err := db.QueryRow("SELECT id, email, username FROM users WHERE id=$1", id).Scan(&user.ID, &user.Email, &user.Username)
+	if err != nil {
+		fmt.Println(err)
+		http.Error(w, "error quering user"+err.Error(), http.StatusInternalServerError)
+	}
 
 	v := params["username"]
 	if len(v) > 0 {
@@ -250,21 +254,18 @@ func updateUser(w http.ResponseWriter, r *http.Request) {
 		user.Password = v
 	}
 
+	_, err = db.Exec("UPDATE users SET email=$1, username=$2 WHERE id=$3", user.Email, user.Username, user.ID)
 	if err != nil {
-		log.Println(err)
-	} else {
-		_, err = db.Exec("UPDATE users SET email=$1, username=$2 WHERE id=$3", user.Email, user.Username, user.ID)
+		fmt.Println(err)
+		http.Error(w, "error with update query"+err.Error(), http.StatusNotFound)
 	}
-
-	if err != nil {
-		log.Println(err)
-	}
-	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
 
 	json.NewEncoder(w).Encode(user)
 }
 
 func deleteUser(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
+
 	user := User{}
 
 	params := mux.Vars(r)
@@ -273,9 +274,9 @@ func deleteUser(w http.ResponseWriter, r *http.Request) {
 	err := db.QueryRow("DELETE FROM users WHERE id=$1 RETURNING id,username,email", id).Scan(&user.ID, &user.Email, &user.Username)
 
 	if err != nil {
-		log.Println(err)
+		fmt.Println(err)
+		http.Error(w, "error with delete query"+err.Error(), http.StatusNotFound)
 	}
-	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
 
 	json.NewEncoder(w).Encode(user)
 }
@@ -304,25 +305,21 @@ func validPassword(pwd string, hashPwd string) error {
 	return err
 }
 
-func checkIfError(e error) {
-	if e != nil {
-		log.Fatalln(e)
-	}
-}
-
 func getUsers(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
+
 	users, err := getUsersData()
 
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, "error getting user data: "+err.Error(), http.StatusInternalServerError)
 	}
-
-	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
 
 	json.NewEncoder(w).Encode(users)
 }
 
 func createUser(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
+
 	var u User
 
 	body, err := ioutil.ReadAll(r.Body)
@@ -351,15 +348,15 @@ func createUser(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Provide password please", 400)
 		return
 	}
-	u.Password = hashPwd([]byte(u.Password))
-
+	u.Password, err = hashPwd([]byte(u.Password))
+	if err != nil {
+		http.Error(w, "error hashing password: "+err.Error(), http.StatusInternalServerError)
+	}
 	user, err := createUserData(&u)
 
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, "error creating user data: "+err.Error(), http.StatusInternalServerError)
 	}
-
-	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
 
 	json.NewEncoder(w).Encode(user)
 }
@@ -373,8 +370,8 @@ func createUserData(u *User) (*User, error) {
 
 	user := User{}
 
-	if err2 := db.QueryRow("SELECT id, email, username FROM users WHERE username=$1 AND password=$2", u.Username, u.Password).Scan(&user.ID, &user.Email, &user.Username); err2 != nil {
-		return nil, err2
+	if err = db.QueryRow("SELECT id, email, username FROM users WHERE username=$1 AND password=$2", u.Username, u.Password).Scan(&user.ID, &user.Email, &user.Username); err != nil {
+		return nil, err
 	}
 
 	return &user, nil
@@ -413,10 +410,12 @@ func getHashedPassword(username string, password string) (string, error) {
 	return hashedPassword, nil
 }
 
-func hashPwd(pwd []byte) string {
+func hashPwd(pwd []byte) (string, error) {
 	hash, err := bcrypt.GenerateFromPassword(pwd, 10)
 
-	checkIfError(err)
+	if err != nil {
+		return "", err
+	}
 
-	return string(hash)
+	return string(hash), nil
 }
