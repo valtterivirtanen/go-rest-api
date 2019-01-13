@@ -3,6 +3,7 @@ package main
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -27,18 +28,17 @@ type User struct {
 }
 
 type MyError struct {
-	Message string
-	Path    string
-	Error   error
-	Code    int
+	Err *MyErrorProps `json:"error"`
+}
+
+type MyErrorProps struct {
+	Message    string `json:"message"`
+	Error      error  `json:"-"`
+	StatusCode int    `json:"code"`
 }
 
 type JWTToken struct {
 	Token string `json:"token"`
-}
-
-type CustomClaims struct {
-	jwt.StandardClaims
 }
 
 const secret = "tÃ¤tÃ¤.ei_kukaan|tosta,v44nvoiarvata?EIHÃ„N!?"
@@ -96,18 +96,35 @@ func main() {
 	})
 	apiRouter := rtr.PathPrefix("/api").Subrouter()
 
-	apiRouter.HandleFunc("/get-token", getToken).Methods("POST")
+	apiRouter.Handle("/get-token", errorCatcher(getToken)).Methods("POST")
 
-	apiRouter.HandleFunc("/users", autheticationMiddleware(getUsers)).Methods("GET")
-	apiRouter.HandleFunc("/users", createUser).Methods("POST")
-	apiRouter.HandleFunc("/users/{id:[0-9]+}", getUser).Methods("GET")
-	apiRouter.HandleFunc("/users/{id:[0-9]+}", updateUser).Methods("PUT")
-	apiRouter.HandleFunc("/users/{id:[0-9]+}", deleteUser).Methods("DELETE")
+	apiRouter.HandleFunc("/users", authenticationMiddleware(getUsers)).Methods("GET")
+	apiRouter.Handle("/users", errorCatcher(createUser)).Methods("POST")
+	apiRouter.Handle("/users/{id:[0-9]+}", errorCatcher(getUser)).Methods("GET")
+	apiRouter.Handle("/users/{id:[0-9]+}", errorCatcher(updateUser)).Methods("PUT")
+	apiRouter.Handle("/users/{id:[0-9]+}", errorCatcher(deleteUser)).Methods("DELETE")
+
+	rtr.NotFoundHandler = http.Handler(errorCatcher(my404Handler))
 
 	log.Fatal(http.ListenAndServe(":"+port, rtr))
 }
 
-func autheticationMiddleware(next http.HandlerFunc) http.HandlerFunc {
+type errorCatcher func(http.ResponseWriter, *http.Request) *MyError
+
+func (fn errorCatcher) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if e := fn(w, r); e != nil {
+		w.Header().Set("Content-Type", "application/json; charset=UTF-8")
+		log.Printf("Error: %v\n", e.Err.Error)
+		w.WriteHeader(e.Err.StatusCode)
+		json.NewEncoder(w).Encode(e)
+	}
+}
+
+func my404Handler(w http.ResponseWriter, r *http.Request) *MyError {
+	return &MyError{&MyErrorProps{"page not found", errors.New("page not found"), 404}}
+}
+
+func authenticationMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		reqToken := r.Header.Get("Authorization")
 		if len(reqToken) > 0 {
@@ -119,39 +136,35 @@ func autheticationMiddleware(next http.HandlerFunc) http.HandlerFunc {
 				}
 			}
 		}
+		w.Header().Set("Content-Type", "application/json; charset=UTF-8")
 		http.Error(w, "Invalid authorization token", 401)
 	}
 }
 
-func getToken(w http.ResponseWriter, r *http.Request) {
+func getToken(w http.ResponseWriter, r *http.Request) *MyError {
 	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
 
 	var u User
 	body, err := ioutil.ReadAll(r.Body)
 
 	if err != nil {
-		http.Error(w, "Invalid request body "+err.Error(), 400)
-		return
+		return &MyError{&MyErrorProps{"invalid request body", err, 400}}
 	}
 	if len(body) == 0 {
-		http.Error(w, "request body length is 0", 400)
-		return
+		return &MyError{&MyErrorProps{"empty request body", err, 400}}
 	}
 
 	err = json.Unmarshal(body, &u)
 	if err != nil {
-		http.Error(w, "error unmarshalling json: "+err.Error(), 400)
-		return
+		return &MyError{&MyErrorProps{"error unmarshalling json", err, 400}}
 	}
 
 	//username and password are required
 	if len(u.Username) == 0 {
-		http.Error(w, "Provide username please", 400)
-		return
+		return &MyError{&MyErrorProps{"provide username, please", err, 400}}
 	}
 	if len(u.Password) == 0 {
-		http.Error(w, "Provide password please", 400)
-		return
+		return &MyError{&MyErrorProps{"provide password, please", err, 400}}
 	}
 
 	passwrd := u.Password
@@ -161,8 +174,9 @@ func getToken(w http.ResponseWriter, r *http.Request) {
 	if valid == true {
 		token := createToken(name)
 		json.NewEncoder(w).Encode(token)
+		return nil
 	} else {
-		http.Error(w, "Invalid credentials", http.StatusForbidden)
+		return &MyError{&MyErrorProps{"invalid credentials", err, 403}}
 	}
 
 }
@@ -206,27 +220,22 @@ func validateToken(tokenString *JWTToken) bool {
 	return false
 }
 
-func getUser(w http.ResponseWriter, r *http.Request) {
+func getUser(w http.ResponseWriter, r *http.Request) *MyError {
 	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
 
 	user := User{}
 	params := mux.Vars(r)
 	id := params["id"]
 
-	if len(id) == 0 {
-		http.Error(w, "length of user id is 0", http.StatusNotFound)
-	}
-
 	if err := db.QueryRow("SELECT id, email, username FROM users WHERE id=$1", id).Scan(&user.ID, &user.Email, &user.Username); err != nil {
-		fmt.Println(err)
-		http.Error(w, "user not found"+err.Error(), http.StatusNotFound)
-		return
+		return &MyError{&MyErrorProps{"user not found", err, 404}}
 	}
 
 	json.NewEncoder(w).Encode(user)
+	return nil
 }
 
-func updateUser(w http.ResponseWriter, r *http.Request) {
+func updateUser(w http.ResponseWriter, r *http.Request) *MyError{
 	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
 
 	user := User{}
@@ -235,8 +244,7 @@ func updateUser(w http.ResponseWriter, r *http.Request) {
 
 	err := db.QueryRow("SELECT id, email, username FROM users WHERE id=$1", id).Scan(&user.ID, &user.Email, &user.Username)
 	if err != nil {
-		fmt.Println(err)
-		http.Error(w, "error quering user"+err.Error(), http.StatusInternalServerError)
+		return &MyError{&MyErrorProps{"error quering user", err, 400}}
 	}
 
 	v := params["username"]
@@ -256,14 +264,14 @@ func updateUser(w http.ResponseWriter, r *http.Request) {
 
 	_, err = db.Exec("UPDATE users SET email=$1, username=$2 WHERE id=$3", user.Email, user.Username, user.ID)
 	if err != nil {
-		fmt.Println(err)
-		http.Error(w, "error with update query"+err.Error(), http.StatusNotFound)
+		return &MyError{&MyErrorProps{"error updating user", err, 400}}
 	}
 
 	json.NewEncoder(w).Encode(user)
+	return nil
 }
 
-func deleteUser(w http.ResponseWriter, r *http.Request) {
+func deleteUser(w http.ResponseWriter, r *http.Request) *MyError {
 	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
 
 	user := User{}
@@ -274,11 +282,11 @@ func deleteUser(w http.ResponseWriter, r *http.Request) {
 	err := db.QueryRow("DELETE FROM users WHERE id=$1 RETURNING id,username,email", id).Scan(&user.ID, &user.Email, &user.Username)
 
 	if err != nil {
-		fmt.Println(err)
-		http.Error(w, "error with delete query"+err.Error(), http.StatusNotFound)
+		return &MyError{&MyErrorProps{"error deleting user", err, 400}}
 	}
 
 	json.NewEncoder(w).Encode(user)
+	return nil
 }
 
 func validateCredentials(name string, passwrd string) bool {
@@ -317,7 +325,7 @@ func getUsers(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(users)
 }
 
-func createUser(w http.ResponseWriter, r *http.Request) {
+func createUser(w http.ResponseWriter, r *http.Request) *MyError {
 	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
 
 	var u User
@@ -325,40 +333,36 @@ func createUser(w http.ResponseWriter, r *http.Request) {
 	body, err := ioutil.ReadAll(r.Body)
 
 	if err != nil {
-		http.Error(w, "Invalid request body", 400)
-		return
+		return &MyError{&MyErrorProps{"invalid request body", err, 400}}
 	}
 	if len(body) == 0 {
-		http.Error(w, "Please give a request body", 400)
-		return
+		return &MyError{&MyErrorProps{"please provide a request body", err, 400}}
 	}
 
 	err = json.Unmarshal(body, &u)
 	if err != nil {
-		http.Error(w, err.Error(), 400)
-		return
+		return &MyError{&MyErrorProps{"mashalling failed", err, 400}}
 	}
 
 	//username and password are required
 	if len(u.Username) == 0 {
-		http.Error(w, "Provide username please", 400)
-		return
+		return &MyError{&MyErrorProps{"please provide a username, please", err, 400}}
 	}
 	if len(u.Password) == 0 {
-		http.Error(w, "Provide password please", 400)
-		return
+		return &MyError{&MyErrorProps{"please provide a password, please", err, 400}}
 	}
 	u.Password, err = hashPwd([]byte(u.Password))
 	if err != nil {
-		http.Error(w, "error hashing password: "+err.Error(), http.StatusInternalServerError)
+		return &MyError{&MyErrorProps{"error hashing password", err, 400}}
 	}
 	user, err := createUserData(&u)
 
 	if err != nil {
-		http.Error(w, "error creating user data: "+err.Error(), http.StatusInternalServerError)
+		return &MyError{&MyErrorProps{"error creating user data", err, 400}}
 	}
 
 	json.NewEncoder(w).Encode(user)
+	return nil
 }
 
 func createUserData(u *User) (*User, error) {
