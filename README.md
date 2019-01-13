@@ -8,6 +8,7 @@
   - [x] Choose claims and set them
   - [x] Token expiration
   - [ ] Token renewal
+  - [ ] nbf / notbeforetime claim set and verified
 - [ ] remain stateless
 - [ ] split the code into smaller packgages/files
 - [ ] improve error handling
@@ -23,9 +24,14 @@
 - [ ] (unit)tests for everything
 - [ ] one (more) checklist to look at https://www.kennethlange.com/rest-api-checklist/
 - [ ] cache db queries
-- [ ] concurrent calls?
+- [ ] concurrent calls? go-routines
 - [ ] add roles/permissions to users
 - [ ] API documentation
+- [ ] HTTP ETags
+- [ ] Ability to cancel requests using context package
+- [ ] Throttle to limit request frequency (429 "Too Many Requests")
+- [ ] Ability to respond in xml-format also, if requested so
+
 
 
 ## db structure @ the moment
