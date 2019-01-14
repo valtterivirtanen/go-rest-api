@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
+	"mime"
 	"net/http"
 	"os"
 	"strings"
@@ -95,7 +96,7 @@ func main() {
 		in["server"] = "running"
 		json.NewEncoder(w).Encode(in)
 
-	})
+	}).Methods("GET")
 	rtr.Handle("/get-token", errorCatcher(getToken)).Methods("POST")
 
 	apiRouter := rtr.PathPrefix("/api").Subrouter()
@@ -107,7 +108,9 @@ func main() {
 	apiRouter.Handle("/users/{id:[0-9]+}", errorCatcher(deleteUser)).Methods("DELETE")
 
 	rtr.NotFoundHandler = http.Handler(applyHeadersMiddleware(errorCatcher(my404Handler)))
-	rtr.Use(applyHeadersMiddleware)
+	rtr.MethodNotAllowedHandler = http.Handler(applyHeadersMiddleware(errorCatcher(my405Handler)))
+
+	rtr.Use(myLoggerMiddleware, applyHeadersMiddleware, checkContentTypeMiddleware)
 	apiRouter.Use(authenticationMiddleware)
 
 	log.Fatal(http.ListenAndServe(":"+port, rtr))
@@ -125,7 +128,11 @@ func (fn errorCatcher) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func my404Handler(w http.ResponseWriter, r *http.Request) *MyError {
-	return &MyError{&MyErrorProps{"page not found", errors.New("page not found:" + r.URL.Path), 404}}
+	return &MyError{&MyErrorProps{"page not found", errors.New("page not found: " + r.URL.String()), 404}}
+}
+
+func my405Handler(w http.ResponseWriter, r *http.Request) *MyError {
+	return &MyError{&MyErrorProps{"method not allowed", errors.New("method not allowed: " + r.Method), 405}}
 }
 
 func authenticationMiddleware(next http.Handler) http.Handler {
@@ -156,6 +163,45 @@ func applyHeadersMiddleware(next http.Handler) http.Handler {
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE")
 
+		next.ServeHTTP(w, r)
+
+		return nil
+	}))
+}
+
+func checkContentTypeMiddleware(next http.Handler) http.Handler {
+	return http.Handler(errorCatcher(func(w http.ResponseWriter, r *http.Request) *MyError {
+		ct := r.Header.Get("Content-Type")
+		if m, _, err := mime.ParseMediaType(ct); m != "application/json" {
+			return &MyError{&MyErrorProps{"invalid content-type", err, 400}}
+		}
+		next.ServeHTTP(w, r)
+
+		return nil
+	}))
+}
+
+func myLoggerMiddleware(next http.Handler) http.Handler {
+	return http.Handler(errorCatcher(func(w http.ResponseWriter, r *http.Request) *MyError {
+		t := time.Now().Format(time.RFC3339)
+
+		ua := r.Header.Get("User-Agent")
+		mthd := r.Method
+		url := r.URL.String()
+
+		text := fmt.Sprintf("%s %s %s %s\n", t, mthd, url, ua)
+
+		f, err := os.OpenFile("log.txt", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
+		if err != nil {
+			return &MyError{&MyErrorProps{"opening log file failed", err, 400}}
+		}
+
+		defer f.Close()
+
+		if _, err = f.WriteString(text); err != nil {
+			return &MyError{&MyErrorProps{"writing log file failed", err, 400}}
+
+		}
 		next.ServeHTTP(w, r)
 
 		return nil
