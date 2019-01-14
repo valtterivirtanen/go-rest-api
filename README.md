@@ -11,13 +11,17 @@
   - [ ] nbf / notbeforetime claim set and verified
 - [ ] remain stateless
 - [ ] split the code into smaller packgages/files
-- [ ] improve error handling
+- improve error handling
+  - [x] Error responses in JSON format
+  - [x] Error JSON has some sort of consistent structure
+  - [x] Tracestack?
+  - [x] 404 handler
 - add some middleware
   - [x] authenticator
   - [ ] trimmer
   - [ ] some validation?
 - [ ] create helper function for JSON responses
-- [ ] create helper function for http error responses
+- [x] create functionality for http error responses
 - [ ] create helper function for database calls
 - [ ] improve API security https://github.com/shieldfy/API-Security-Checklist
 - [ ] log everything and manage logs
@@ -31,6 +35,7 @@
 - [ ] Ability to cancel requests using context package
 - [ ] Throttle to limit request frequency (429 "Too Many Requests")
 - [ ] Ability to respond in xml-format also, if requested so
+- [ ] HTTPS
 
 
 
