@@ -49,7 +49,7 @@ func init() {
 	checkDbVariable := func(v string) string {
 		val, ok := os.LookupEnv(v)
 		if !ok {
-			fmt.Printf("Environment variable for %v is missing\n", v)
+			log.Fatal("Environment variable for %v is missing\n", v)
 			return ""
 		}
 		return val
@@ -85,26 +85,30 @@ func main() {
 
 	if port == "" {
 		port = "8000"
-		log.Printf("Port defaulted to %v", port)
+		log.Printf("Port defaulted to %v\n", port)
 	}
 	rtr := mux.NewRouter()
 
 	rtr.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json; charset=UTF-8")
-		json.NewEncoder(w).Encode("{'server':'running'}")
+		var in map[string]string
+		in = make(map[string]string)
+		in["server"] = "running"
+		json.NewEncoder(w).Encode(in)
 
 	})
+	rtr.Handle("/get-token", errorCatcher(getToken)).Methods("POST")
+
 	apiRouter := rtr.PathPrefix("/api").Subrouter()
 
-	apiRouter.Handle("/get-token", errorCatcher(getToken)).Methods("POST")
-
-	apiRouter.Handle("/users", authenticationMiddleware(errorCatcher(getUsers))).Methods("GET")
+	apiRouter.Handle("/users", errorCatcher(getUsers)).Methods("GET")
 	apiRouter.Handle("/users", errorCatcher(createUser)).Methods("POST")
 	apiRouter.Handle("/users/{id:[0-9]+}", errorCatcher(getUser)).Methods("GET")
 	apiRouter.Handle("/users/{id:[0-9]+}", errorCatcher(updateUser)).Methods("PUT")
 	apiRouter.Handle("/users/{id:[0-9]+}", errorCatcher(deleteUser)).Methods("DELETE")
 
-	rtr.NotFoundHandler = http.Handler(errorCatcher(my404Handler))
+	rtr.NotFoundHandler = http.Handler(applyHeadersMiddleware(errorCatcher(my404Handler)))
+	rtr.Use(applyHeadersMiddleware)
+	apiRouter.Use(authenticationMiddleware)
 
 	log.Fatal(http.ListenAndServe(":"+port, rtr))
 }
@@ -113,7 +117,7 @@ type errorCatcher func(http.ResponseWriter, *http.Request) *MyError
 
 func (fn errorCatcher) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if e := fn(w, r); e != nil {
-		w.Header().Set("Content-Type", "application/json; charset=UTF-8")
+
 		log.Printf("Error: %v\n", e.Err.Error)
 		w.WriteHeader(e.Err.StatusCode)
 		json.NewEncoder(w).Encode(e)
@@ -144,8 +148,21 @@ func authenticationMiddleware(next http.Handler) http.Handler {
 	}))
 }
 
+func applyHeadersMiddleware(next http.Handler) http.Handler {
+	return http.Handler(errorCatcher(func(w http.ResponseWriter, r *http.Request) *MyError {
+		w.Header().Set("Content-Type", "application/json; charset=UTF-8")
+
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE")
+
+		next.ServeHTTP(w, r)
+
+		return nil
+	}))
+}
+
 func getToken(w http.ResponseWriter, r *http.Request) *MyError {
-	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
 
 	var u User
 	body, err := ioutil.ReadAll(r.Body)
@@ -222,7 +239,6 @@ func validateToken(tokenString *JWTToken) error {
 }
 
 func getUser(w http.ResponseWriter, r *http.Request) *MyError {
-	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
 
 	user := User{}
 	params := mux.Vars(r)
@@ -237,7 +253,6 @@ func getUser(w http.ResponseWriter, r *http.Request) *MyError {
 }
 
 func updateUser(w http.ResponseWriter, r *http.Request) *MyError {
-	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
 
 	user := User{}
 	params := mux.Vars(r)
@@ -273,7 +288,6 @@ func updateUser(w http.ResponseWriter, r *http.Request) *MyError {
 }
 
 func deleteUser(w http.ResponseWriter, r *http.Request) *MyError {
-	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
 
 	user := User{}
 
@@ -315,7 +329,6 @@ func validPassword(pwd string, hashPwd string) error {
 }
 
 func getUsers(w http.ResponseWriter, r *http.Request) *MyError {
-	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
 
 	users, err := getUsersData()
 
@@ -328,7 +341,6 @@ func getUsers(w http.ResponseWriter, r *http.Request) *MyError {
 }
 
 func createUser(w http.ResponseWriter, r *http.Request) *MyError {
-	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
 
 	var u User
 
