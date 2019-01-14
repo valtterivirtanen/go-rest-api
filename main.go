@@ -98,7 +98,7 @@ func main() {
 
 	apiRouter.Handle("/get-token", errorCatcher(getToken)).Methods("POST")
 
-	apiRouter.HandleFunc("/users", authenticationMiddleware(getUsers)).Methods("GET")
+	apiRouter.Handle("/users", authenticationMiddleware(errorCatcher(getUsers))).Methods("GET")
 	apiRouter.Handle("/users", errorCatcher(createUser)).Methods("POST")
 	apiRouter.Handle("/users/{id:[0-9]+}", errorCatcher(getUser)).Methods("GET")
 	apiRouter.Handle("/users/{id:[0-9]+}", errorCatcher(updateUser)).Methods("PUT")
@@ -121,24 +121,27 @@ func (fn errorCatcher) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func my404Handler(w http.ResponseWriter, r *http.Request) *MyError {
-	return &MyError{&MyErrorProps{"page not found", errors.New("page not found"), 404}}
+	return &MyError{&MyErrorProps{"page not found", errors.New("page not found:" + r.URL.Path), 404}}
 }
 
-func authenticationMiddleware(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
+func authenticationMiddleware(next http.Handler) http.Handler {
+	return http.Handler(errorCatcher(func(w http.ResponseWriter, r *http.Request) *MyError {
 		reqToken := r.Header.Get("Authorization")
-		if len(reqToken) > 0 {
-			splitToken := strings.Split(reqToken, "Bearer ")
-			if len(splitToken) > 1 {
-				token := JWTToken{splitToken[1]}
-				if validateToken(&token) {
-					next.ServeHTTP(w, r)
-				}
-			}
+		if len(reqToken) == 0 {
+			return &MyError{&MyErrorProps{"authorization header missing", errors.New("authorization header missing"), 401}}
 		}
-		w.Header().Set("Content-Type", "application/json; charset=UTF-8")
-		http.Error(w, "Invalid authorization token", 401)
-	}
+		splitToken := strings.Split(reqToken, "Bearer ")
+		if len(splitToken) <= 1 {
+			return &MyError{&MyErrorProps{"invalid authorization token", errors.New("invalid authorization token"), 401}}
+
+		}
+		token := JWTToken{splitToken[1]}
+		if err := validateToken(&token); err != nil {
+			return &MyError{&MyErrorProps{"invalid authorization token", err, 401}}
+		}
+		next.ServeHTTP(w, r)
+		return nil
+	}))
 }
 
 func getToken(w http.ResponseWriter, r *http.Request) *MyError {
@@ -171,17 +174,18 @@ func getToken(w http.ResponseWriter, r *http.Request) *MyError {
 	name := u.Username
 
 	valid := validateCredentials(name, passwrd)
-	if valid == true {
-		token := createToken(name)
-		json.NewEncoder(w).Encode(token)
-		return nil
-	} else {
+	if valid == false {
 		return &MyError{&MyErrorProps{"invalid credentials", err, 403}}
 	}
-
+	token, err := createToken(name)
+	if err != nil {
+		return &MyError{&MyErrorProps{"error signing token string", err, 403}}
+	}
+	json.NewEncoder(w).Encode(token)
+	return nil
 }
 
-func createToken(username string) *JWTToken {
+func createToken(username string) (*JWTToken, error) {
 	claims := make(jwt.MapClaims)
 	claims["name"] = username
 	claims["exp"] = time.Now().Add(time.Minute * 10).Unix()
@@ -190,16 +194,15 @@ func createToken(username string) *JWTToken {
 
 	tokenStr, err := token.SignedString([]byte(secret))
 	if err != nil {
-		fmt.Println("error signing token string:", err)
-		return nil
+		return nil, err
 	}
 
 	JWTToken := JWTToken{tokenStr}
 
-	return &JWTToken
+	return &JWTToken, nil
 }
 
-func validateToken(tokenString *JWTToken) bool {
+func validateToken(tokenString *JWTToken) error {
 	token, err := jwt.Parse(tokenString.Token, func(token *jwt.Token) (interface{}, error) {
 
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
@@ -210,14 +213,12 @@ func validateToken(tokenString *JWTToken) bool {
 	})
 
 	if err != nil {
-		fmt.Println(err)
-		return false
+		return err
 	}
-	if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
-		fmt.Println(claims["name"], claims["exp"], "claims")
-		return true
+	if _, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
+		return nil
 	}
-	return false
+	return errors.New("invalid token")
 }
 
 func getUser(w http.ResponseWriter, r *http.Request) *MyError {
@@ -235,7 +236,7 @@ func getUser(w http.ResponseWriter, r *http.Request) *MyError {
 	return nil
 }
 
-func updateUser(w http.ResponseWriter, r *http.Request) *MyError{
+func updateUser(w http.ResponseWriter, r *http.Request) *MyError {
 	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
 
 	user := User{}
@@ -313,16 +314,17 @@ func validPassword(pwd string, hashPwd string) error {
 	return err
 }
 
-func getUsers(w http.ResponseWriter, r *http.Request) {
+func getUsers(w http.ResponseWriter, r *http.Request) *MyError {
 	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
 
 	users, err := getUsersData()
 
 	if err != nil {
-		http.Error(w, "error getting user data: "+err.Error(), http.StatusInternalServerError)
+		return &MyError{&MyErrorProps{"error getting user data", err, 400}}
 	}
 
 	json.NewEncoder(w).Encode(users)
+	return nil
 }
 
 func createUser(w http.ResponseWriter, r *http.Request) *MyError {
