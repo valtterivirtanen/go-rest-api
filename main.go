@@ -36,6 +36,7 @@ type MyErrorProps struct {
 	Message    string `json:"message"`
 	Error      error  `json:"-"`
 	StatusCode int    `json:"code"`
+	StatusText string `json:"status"`
 }
 
 type JWTToken struct {
@@ -50,7 +51,7 @@ func init() {
 	checkDbVariable := func(v string) string {
 		val, ok := os.LookupEnv(v)
 		if !ok {
-			log.Fatal("Environment variable for %v is missing\n", v)
+			log.Fatal("environment variable for " + v + " is missing\n")
 			return ""
 		}
 		return val
@@ -96,7 +97,7 @@ func main() {
 		in["server"] = "running"
 		json.NewEncoder(w).Encode(in)
 
-	}).Methods("GET")
+	}).Methods("GET", "OPTIONS")
 	rtr.Handle("/get-token", errorCatcher(getToken)).Methods("POST")
 
 	apiRouter := rtr.PathPrefix("/api").Subrouter()
@@ -123,32 +124,33 @@ func (fn errorCatcher) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		log.Printf("Error: %v\n", e.Err.Error)
 		w.WriteHeader(e.Err.StatusCode)
+		e.Err.StatusText = http.StatusText(e.Err.StatusCode)
 		json.NewEncoder(w).Encode(e)
 	}
 }
 
 func my404Handler(w http.ResponseWriter, r *http.Request) *MyError {
-	return &MyError{&MyErrorProps{"page not found", errors.New("page not found: " + r.URL.String()), 404}}
+	return &MyError{&MyErrorProps{"page not found", errors.New("page not found: " + r.URL.String()), 404, ""}}
 }
 
 func my405Handler(w http.ResponseWriter, r *http.Request) *MyError {
-	return &MyError{&MyErrorProps{"method not allowed", errors.New("method not allowed: " + r.Method), 405}}
+	return &MyError{&MyErrorProps{"method not allowed", errors.New("method not allowed: " + r.Method), 405, ""}}
 }
 
 func authenticationMiddleware(next http.Handler) http.Handler {
 	return http.Handler(errorCatcher(func(w http.ResponseWriter, r *http.Request) *MyError {
 		reqToken := r.Header.Get("Authorization")
 		if len(reqToken) == 0 {
-			return &MyError{&MyErrorProps{"authorization header missing", errors.New("authorization header missing"), 401}}
+			return &MyError{&MyErrorProps{"authorization header missing", errors.New("authorization header missing"), 401, ""}}
 		}
 		splitToken := strings.Split(reqToken, "Bearer ")
 		if len(splitToken) <= 1 {
-			return &MyError{&MyErrorProps{"invalid authorization token", errors.New("invalid authorization token"), 401}}
+			return &MyError{&MyErrorProps{"invalid authorization token", errors.New("invalid authorization token"), 401, ""}}
 
 		}
 		token := JWTToken{splitToken[1]}
 		if err := validateToken(&token); err != nil {
-			return &MyError{&MyErrorProps{"invalid authorization token", err, 401}}
+			return &MyError{&MyErrorProps{"invalid authorization token", err, 401, ""}}
 		}
 		next.ServeHTTP(w, r)
 		return nil
@@ -173,7 +175,7 @@ func checkContentTypeMiddleware(next http.Handler) http.Handler {
 	return http.Handler(errorCatcher(func(w http.ResponseWriter, r *http.Request) *MyError {
 		ct := r.Header.Get("Content-Type")
 		if m, _, err := mime.ParseMediaType(ct); m != "application/json" {
-			return &MyError{&MyErrorProps{"invalid content-type", err, 400}}
+			return &MyError{&MyErrorProps{"invalid content-type", err, 400, ""}}
 		}
 		next.ServeHTTP(w, r)
 
@@ -183,25 +185,32 @@ func checkContentTypeMiddleware(next http.Handler) http.Handler {
 
 func myLoggerMiddleware(next http.Handler) http.Handler {
 	return http.Handler(errorCatcher(func(w http.ResponseWriter, r *http.Request) *MyError {
+		ip := r.RemoteAddr
+		forward := r.Header.Get("X-Forwarded-For")
+		if len(forward) == 0 {
+			forward = "-"
+		}
 		t := time.Now().Format(time.RFC3339)
 
 		ua := r.Header.Get("User-Agent")
 		mthd := r.Method
-		url := r.URL.String()
+		url := r.RequestURI
+		proto := r.Proto
 
-		text := fmt.Sprintf("%s %s %s %s\n", t, mthd, url, ua)
+		text := fmt.Sprintf("%s\t(%s)\t%s\t\"%s\t%s\t%s\"\t%s\n", ip, forward, t, mthd, url, proto, ua)
 
-		f, err := os.OpenFile("log.txt", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
+		f, err := os.OpenFile("requests.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
 		if err != nil {
-			return &MyError{&MyErrorProps{"opening log file failed", err, 400}}
+			return &MyError{&MyErrorProps{"opening log file failed", err, 400, ""}}
 		}
 
 		defer f.Close()
 
 		if _, err = f.WriteString(text); err != nil {
-			return &MyError{&MyErrorProps{"writing log file failed", err, 400}}
+			return &MyError{&MyErrorProps{"writing log file failed", err, 400, ""}}
 
 		}
+
 		next.ServeHTTP(w, r)
 
 		return nil
@@ -214,23 +223,23 @@ func getToken(w http.ResponseWriter, r *http.Request) *MyError {
 	body, err := ioutil.ReadAll(r.Body)
 
 	if err != nil {
-		return &MyError{&MyErrorProps{"invalid request body", err, 400}}
+		return &MyError{&MyErrorProps{"invalid request body", err, 400, ""}}
 	}
 	if len(body) == 0 {
-		return &MyError{&MyErrorProps{"empty request body", err, 400}}
+		return &MyError{&MyErrorProps{"empty request body", err, 400, ""}}
 	}
 
 	err = json.Unmarshal(body, &u)
 	if err != nil {
-		return &MyError{&MyErrorProps{"error unmarshalling json", err, 400}}
+		return &MyError{&MyErrorProps{"error unmarshalling json", err, 400, ""}}
 	}
 
 	//username and password are required
 	if len(u.Username) == 0 {
-		return &MyError{&MyErrorProps{"provide username, please", err, 400}}
+		return &MyError{&MyErrorProps{"provide username, please", err, 400, ""}}
 	}
 	if len(u.Password) == 0 {
-		return &MyError{&MyErrorProps{"provide password, please", err, 400}}
+		return &MyError{&MyErrorProps{"provide password, please", err, 400, ""}}
 	}
 
 	passwrd := u.Password
@@ -238,11 +247,11 @@ func getToken(w http.ResponseWriter, r *http.Request) *MyError {
 
 	valid := validateCredentials(name, passwrd)
 	if valid == false {
-		return &MyError{&MyErrorProps{"invalid credentials", err, 403}}
+		return &MyError{&MyErrorProps{"invalid credentials", err, 403, ""}}
 	}
 	token, err := createToken(name)
 	if err != nil {
-		return &MyError{&MyErrorProps{"error signing token string", err, 403}}
+		return &MyError{&MyErrorProps{"error signing token string", err, 403, ""}}
 	}
 	json.NewEncoder(w).Encode(token)
 	return nil
@@ -291,7 +300,7 @@ func getUser(w http.ResponseWriter, r *http.Request) *MyError {
 	id := params["id"]
 
 	if err := db.QueryRow("SELECT id, email, username FROM users WHERE id=$1", id).Scan(&user.ID, &user.Email, &user.Username); err != nil {
-		return &MyError{&MyErrorProps{"user not found", err, 404}}
+		return &MyError{&MyErrorProps{"user not found", err, 404, ""}}
 	}
 
 	json.NewEncoder(w).Encode(user)
@@ -306,7 +315,7 @@ func updateUser(w http.ResponseWriter, r *http.Request) *MyError {
 
 	err := db.QueryRow("SELECT id, email, username FROM users WHERE id=$1", id).Scan(&user.ID, &user.Email, &user.Username)
 	if err != nil {
-		return &MyError{&MyErrorProps{"error quering user", err, 400}}
+		return &MyError{&MyErrorProps{"error quering user", err, 400, ""}}
 	}
 
 	v := params["username"]
@@ -326,7 +335,7 @@ func updateUser(w http.ResponseWriter, r *http.Request) *MyError {
 
 	_, err = db.Exec("UPDATE users SET email=$1, username=$2 WHERE id=$3", user.Email, user.Username, user.ID)
 	if err != nil {
-		return &MyError{&MyErrorProps{"error updating user", err, 400}}
+		return &MyError{&MyErrorProps{"error updating user", err, 400, ""}}
 	}
 
 	json.NewEncoder(w).Encode(user)
@@ -343,7 +352,7 @@ func deleteUser(w http.ResponseWriter, r *http.Request) *MyError {
 	err := db.QueryRow("DELETE FROM users WHERE id=$1 RETURNING id,username,email", id).Scan(&user.ID, &user.Email, &user.Username)
 
 	if err != nil {
-		return &MyError{&MyErrorProps{"error deleting user", err, 400}}
+		return &MyError{&MyErrorProps{"error deleting user", err, 400, ""}}
 	}
 
 	json.NewEncoder(w).Encode(user)
@@ -379,7 +388,7 @@ func getUsers(w http.ResponseWriter, r *http.Request) *MyError {
 	users, err := getUsersData()
 
 	if err != nil {
-		return &MyError{&MyErrorProps{"error getting user data", err, 400}}
+		return &MyError{&MyErrorProps{"error getting user data", err, 400, ""}}
 	}
 
 	json.NewEncoder(w).Encode(users)
@@ -393,32 +402,32 @@ func createUser(w http.ResponseWriter, r *http.Request) *MyError {
 	body, err := ioutil.ReadAll(r.Body)
 
 	if err != nil {
-		return &MyError{&MyErrorProps{"invalid request body", err, 400}}
+		return &MyError{&MyErrorProps{"invalid request body", err, 400, ""}}
 	}
 	if len(body) == 0 {
-		return &MyError{&MyErrorProps{"please provide a request body", err, 400}}
+		return &MyError{&MyErrorProps{"please provide a request body", err, 400, ""}}
 	}
 
 	err = json.Unmarshal(body, &u)
 	if err != nil {
-		return &MyError{&MyErrorProps{"mashalling failed", err, 400}}
+		return &MyError{&MyErrorProps{"mashalling failed", err, 400, ""}}
 	}
 
 	//username and password are required
 	if len(u.Username) == 0 {
-		return &MyError{&MyErrorProps{"please provide a username, please", err, 400}}
+		return &MyError{&MyErrorProps{"please provide a username, please", err, 400, ""}}
 	}
 	if len(u.Password) == 0 {
-		return &MyError{&MyErrorProps{"please provide a password, please", err, 400}}
+		return &MyError{&MyErrorProps{"please provide a password, please", err, 400, ""}}
 	}
 	u.Password, err = hashPwd([]byte(u.Password))
 	if err != nil {
-		return &MyError{&MyErrorProps{"error hashing password", err, 400}}
+		return &MyError{&MyErrorProps{"error hashing password", err, 400, ""}}
 	}
 	user, err := createUserData(&u)
 
 	if err != nil {
-		return &MyError{&MyErrorProps{"error creating user data", err, 400}}
+		return &MyError{&MyErrorProps{"error creating user data", err, 400, ""}}
 	}
 
 	json.NewEncoder(w).Encode(user)
