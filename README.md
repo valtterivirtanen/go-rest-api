@@ -9,6 +9,7 @@
   - [x] Token expiration
   - [ ] Token renewal
   - [ ] nbf / notbeforetime claim set and verified
+  - [ ] get rid of secret and use ECDSA
 - [ ] remain stateless
 - [ ] split the code into smaller packgages/files
 - improve error handling
@@ -44,6 +45,10 @@
 - [ ] Throttle to limit request frequency (429 "Too Many Requests")
 - [ ] Ability to respond in xml-format also, if requested so
 - [ ] HTTPS
+- UUID
+  - [ ] Use UUID instead of SERIAL as user id
+  - [ ] Implement UUID generator, and don't use psql module for that (for learning purposes)
+- [ ] Read and run db.sql file on start/init
 
 
 
