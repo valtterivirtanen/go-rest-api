@@ -11,7 +11,10 @@
   - [ ] nbf / notbeforetime claim set and verified
   - [ ] get rid of secret and use ECDSA
 - [ ] remain stateless
-- [ ] split the code into smaller packgages/files
+- split the code
+  - [x] into smaller files
+  - [ ] into packages?
+  - [ ] middlewares out of main.go
 - improve error handling
   - [x] Error responses in JSON format
   - [x] Error JSON has some sort of consistent structure
